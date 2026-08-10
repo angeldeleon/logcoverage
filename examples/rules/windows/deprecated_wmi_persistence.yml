@@ -1,0 +1,14 @@
+title: WMI Event Subscription Persistence
+id: c1d24f8a-3f7b-4b6e-9b13-7a2c9d0e4f33
+status: deprecated
+tags:
+    - attack.persistence
+    - attack.t1546.003
+logsource:
+    product: windows
+    service: sysmon
+detection:
+    selection:
+        EventID: 21
+    condition: selection
+level: medium

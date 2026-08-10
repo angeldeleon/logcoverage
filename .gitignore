@@ -1,0 +1,35 @@
+# logcoverage state — a map of exactly which detections are blind, and for how
+# long. That is an attack plan: it names the techniques nobody would see, and
+# roughly how long an attacker has got. Never commit these.
+.logcoverage/
+/state.json
+/coverage.yml
+/report.md
+/report.html
+/report.json
+/ingestion.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

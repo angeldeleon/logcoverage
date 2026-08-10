@@ -1,0 +1,16 @@
+title: CloudTrail Logging Disabled
+id: 5f0a5f7d-8a4d-4d38-9ad7-6b0b6f3f2a44
+status: stable
+tags:
+    - attack.defense_evasion
+    - attack.t1562.008
+logsource:
+    product: aws
+    service: cloudtrail
+detection:
+    selection:
+        eventName:
+            - StopLogging
+            - DeleteTrail
+    condition: selection
+level: critical

@@ -1,0 +1,161 @@
+# logcoverage configuration
+#
+# Copy to coverage.yml and edit. Validate with:
+#     logcoverage validate -c coverage.yml
+#
+# Unknown keys are a hard error, so a typo fails loudly rather than silently
+# disabling an analysis.
+
+rules:
+  # What your detections say they read. At least one of the two is required;
+  # most estates end up with both, because Sigma covers the portable rules and
+  # the mapping file covers everything written directly in a search language.
+  sigma:
+    # A directory tree. Symlinks are refused outright and named in the report,
+    # rather than followed — the check and the open would otherwise be two
+    # lookups of the same name with an attacker in between.
+    path: examples/rules
+    max_files: 20000
+    max_file_bytes: 1048576
+
+  mapping:
+    # Splunk SPL and Sentinel KQL rules, declared by hand. See the file for why
+    # this is not a query parser.
+    path: examples/rule-map.yml
+
+ingestion:
+  # What the SIEM is actually receiving.
+  #   file      — an exported inventory (see the README for the schema)
+  #   splunk    — metadata searches against a search head
+  #   sentinel  — a fixed KQL query against a Log Analytics workspace
+  type: file
+
+  file:
+    path: examples/ingestion-export.json
+
+  # splunk:
+  #   base_url: https://splunk.example.com:8089
+  #   # The NAME of an environment variable, never the token itself. A URL or
+  #   # path here is rejected, so a credential cannot be committed by accident.
+  #   token_env: LOGCOVERAGE_SPLUNK_TOKEN
+  #   window_days: 7
+  #   # A search head on an internal address is the normal case, so this
+  #   # defaults to true. It does not survive a cross-origin redirect.
+  #   allow_internal: true
+  #   # One extra search per source. Off by default; with it off, field-level
+  #   # gaps are reported as indeterminate rather than as absent fields.
+  #   sample_fields: false
+
+  # sentinel:
+  #   workspace_id: 00000000-0000-0000-0000-000000000000
+  #   tenant_id: 00000000-0000-0000-0000-000000000000
+  #   client_id: 00000000-0000-0000-0000-000000000000
+  #   client_secret_env: LOGCOVERAGE_SENTINEL_CLIENT_SECRET
+  #   window_days: 7
+
+inventory:
+  # What your critical systems are supposed to emit. Optional, and the only
+  # input that can find a system nobody ever onboarded — such a system produces
+  # no ingestion row and breaks no detection, so nothing else in this tool
+  # would see it.
+  path: examples/critical-systems.yml
+
+policy:
+  # A source that has produced nothing for this long is silent. Two days is
+  # deliberately short: for a source feeding a dozen detections, two days of
+  # silence is two days of blindness.
+  staleness_days: 2
+
+  # Past this, the silence is not an outage somebody is working through. Rated
+  # separately so a four-month gap does not read like a long weekend.
+  long_silence_days: 30
+
+  # Volume against the source's own established baseline. Below the collapse
+  # ratio is a partial forwarder failure; between the two is a decline worth a
+  # look. Sources quieter than the floor are exempt entirely — a source doing
+  # four events a day goes to zero and back for reasons unrelated to a forwarder.
+  volume_collapse_ratio: 0.25
+  volume_decline_ratio: 0.6
+  volume_floor_per_day: 100
+  # How many runs before a derived baseline is trusted. A baseline declared in
+  # the ingestion export needs none of these.
+  volume_min_samples: 3
+
+  # How reliance is sized, in enabled detections reading the source. A source
+  # at or above critical_path_rules raises its findings one band; below
+  # broad_rules lowers them one; a source no enabled detection reads lowers them
+  # two, because that finding is housekeeping rather than coverage.
+  critical_path_rules: 8
+  broad_rules: 3
+
+  # How *this* estate spells its sources. Always beats the built-in catalog,
+  # which cannot know that your Zeek data lands in an index called net_prod_03.
+  source_aliases:
+    # net_prod_03: network/zeek_conn
+    # wineventlog_dc: windows/security
+
+  # Never analysed at all — matched on the canonical source key.
+  ignore_sources:
+    # - test/lab
+
+  # Sources you know feed no detection, and have accepted. Retention for
+  # incident response is a perfectly good reason to ingest something no rule
+  # reads; keeping this list curated is what makes the next unexplained index
+  # stand out.
+  accepted_orphans:
+    # - network/zeek_conn
+
+  # Detections whose findings are suppressed — matched on id, path or name.
+  ignore_rules:
+    # - 42c575ea-e01e-4a44-9a1a-0d16e1b1e3f1
+
+  # Whether disabled and deprecated rules contribute findings. Off by default:
+  # a deprecated rule reading a dead source is not a coverage gap.
+  include_disabled_rules: false
+
+settings:
+  # Names the baseline. Two configs sharing a state file keep separate history.
+  estate: default
+  analyses:
+    - required_absent
+    - silent_source
+    - volume_collapse
+    - field_gaps
+    - expected_unconfigured
+    - orphan_ingestion
+    - technique_coverage
+  fail_on: high
+  http_timeout: 30
+  max_rules: 50000
+  max_sources: 20000
+  # Treat this file as sensitive: it is a map of which detections are blind.
+  # Created 0600 and gitignored. See SECURITY.md.
+  state_path: .logcoverage/state.json
+
+notify:
+  # Environment variable NAMES, never the URLs.
+  # slack_webhook_url_env: SLACK_WEBHOOK_URL
+  # webhook_url_env: LOGCOVERAGE_WEBHOOK_URL
+  min_severity: high
+  max_findings_per_message: 20
+
+  # email:
+  #   smtp_host: smtp.example.com
+  #   smtp_port: 587
+  #   use_starttls: true
+  #   username_env: SMTP_USERNAME
+  #   password_env: SMTP_PASSWORD
+  #   from_address: logcoverage@example.com
+  #   to_addresses: [detection@example.com]
+
+ai:
+  # Off by default, and it cannot change a finding: it runs after every finding,
+  # severity, technique verdict and exit code is final, and writes one prose
+  # paragraph. Enabling it tells a third party which ATT&CK techniques your
+  # organisation currently cannot detect.
+  enabled: false
+  provider: anthropic
+  model: claude-sonnet-4-5
+  api_key_env: ANTHROPIC_API_KEY
+  summarize: true
+  max_items: 40

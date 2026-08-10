@@ -1,0 +1,9 @@
+title: A rule this parser cannot read
+logsource:
+  product: windows
+detection:
+  selection:
+    EventID: 1
+  condition: selection
+  bad_indent:
+   - [unclosed

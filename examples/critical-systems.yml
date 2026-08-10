@@ -1,0 +1,45 @@
+# What your critical systems are supposed to be emitting.
+#
+# This is the only input to logcoverage that is a statement of intent rather
+# than an observation, and it is the only thing that can find a system nobody
+# ever onboarded: such a system produces no ingestion row to go stale and breaks
+# no detection, because the detections it should feed are kept alive by every
+# other host of its class.
+#
+# Keep it short. An inventory nobody updates produces findings about machines
+# that were decommissioned last year, and a team learns to skip that section
+# quickly.
+
+systems:
+  - name: Domain controllers
+    criticality: critical
+    owner: platform-identity
+    sources:
+      - windows/security
+      - windows/sysmon
+
+  - name: Internet-facing web tier
+    criticality: critical
+    owner: platform-web
+    sources:
+      - windows/process_creation
+      - network/proxy
+
+  - name: AWS production accounts
+    criticality: critical
+    owner: cloud-platform
+    sources:
+      - aws/cloudtrail
+
+  - name: Entra ID tenant
+    criticality: high
+    owner: platform-identity
+    sources:
+      - azure/signin
+      - azure/audit
+
+  - name: Developer workstations
+    criticality: standard
+    owner: end-user-computing
+    sources:
+      - windows/process_creation

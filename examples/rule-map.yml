@@ -1,0 +1,40 @@
+# Detections whose requirements cannot be read from the rule itself.
+#
+# A saved search in Splunk and an analytics rule in Sentinel state what they
+# read in the query text, in a search language. Parsing that language — macros,
+# lookups, data model indirection — is a real problem and a different tool, and
+# a version of it that was subtly wrong here would produce confident coverage
+# claims from a misparse. So the operator writes it down.
+#
+# The trade is honest: this file goes stale if nobody maintains it. What it has
+# that a parser does not is that when it is wrong, somebody wrote the wrong
+# thing down, and the commit has their name on it.
+
+rules:
+  - id: splunk-lateral-psexec
+    name: "SPL — PsExec service on a server VLAN"
+    query_language: spl
+    enabled: true
+    level: high
+    sources: [windows/security]
+    fields: [EventID, ServiceName]
+    techniques: [T1021.002]
+    notes: Saved search, runs every 15 minutes.
+
+  - id: sentinel-impossible-travel
+    name: "KQL — sign-in from two countries inside an hour"
+    query_language: kql
+    enabled: true
+    level: medium
+    sources: [azure/signin]
+    fields: [ResultType, IPAddress, Location]
+    techniques: [T1078.004]
+
+  - id: splunk-proxy-beaconing
+    name: "SPL — periodic outbound beaconing"
+    query_language: spl
+    enabled: true
+    level: high
+    sources: [network/proxy]
+    fields: [url, bytes_out, http_user_agent]
+    techniques: [T1071.001]

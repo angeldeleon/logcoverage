@@ -1,0 +1,19 @@
+title: WMI Event Consumer Created
+id: 3b8a1f22-7c0e-4c1b-9a5d-8e2f4b6c1d66
+status: stable
+description: Detects creation of a WMI event consumer, a common persistence mechanism.
+references:
+    - https://attack.mitre.org/techniques/T1546/003/
+tags:
+    - attack.persistence
+    - attack.t1546.003
+logsource:
+    product: windows
+    service: sysmon
+detection:
+    selection:
+        EventID:
+            - 20
+            - 21
+    condition: selection
+level: high

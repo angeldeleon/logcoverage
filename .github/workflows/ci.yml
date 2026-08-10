@@ -1,0 +1,335 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so dependency advisories surface even when nothing is pushed.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Test
+        run: pytest -m "not network" --cov --cov-report=term-missing
+
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Ruff (lint)
+        run: ruff check --output-format=github .
+      - name: Ruff (format)
+        run: ruff format --check .
+      - name: mypy
+        run: mypy
+
+  security:
+    name: security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Bandit
+        run: bandit -r src/ -c pyproject.toml
+      - name: pip-audit
+        # Audit the project's declared dependencies, not the installed
+        # environment: the latter contains logcoverage itself as an editable
+        # install, which pip-audit cannot resolve on PyPI, and --strict treats
+        # an unauditable package as a hard failure.
+        run: pip-audit --strict --desc on .
+
+  invariants:
+    name: security invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: The tool has no write path into a SIEM
+        # A guard against a future PR quietly acquiring one. SECURITY.md makes a
+        # promise that a read-only credential is sufficient; this enforces it.
+        run: |
+          set -euo pipefail
+          if grep -rnE 'safe_request\(\s*"(PUT|PATCH|DELETE)"' src/logcoverage/; then
+            echo "::error::a module issues a write request"; exit 1
+          fi
+          for forbidden in "requests.post" "httpx.post" "httpx.delete" "httpx.patch" "subprocess" "eval(" "yaml.load(" "os.system"; do
+            if grep -rqF -- "$forbidden" src/logcoverage/; then
+              echo "::error::source tree references '$forbidden'"; exit 1
+            fi
+          done
+          echo "no write path, no unguarded client, no subprocess, no unsafe YAML"
+
+      - name: Config cannot supply a search
+        # A config-injectable search would turn a read-only coverage report into
+        # an arbitrary-query primitive holding a token that can read every index.
+        run: |
+          set -euo pipefail
+          printf 'rules:\n  sigma:\n    path: examples/rules\ningestion:\n  type: splunk\n  splunk:\n    base_url: https://splunk.example.com:8089\n    search: "| tstats count from datamodel=Everything"\n' > bad.yml
+          if logcoverage validate -c bad.yml 2>/dev/null; then
+            echo "::error::config accepted a search key"; exit 1
+          fi
+          echo "config rejects search keys"
+
+      - name: The example config validates offline
+        run: logcoverage validate -c coverage.example.yml
+
+      - name: Every declared analysis is implemented
+        # An analysis an operator can name that no code implements is a
+        # permanently green, permanently blind run — the failure this tool exists
+        # to report, applied to itself.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          from logcoverage.analysis import registered_analyses
+          from logcoverage.config import ALL_ANALYSES
+          missing = sorted(set(ALL_ANALYSES) - set(registered_analyses()))
+          orphaned = sorted(set(registered_analyses()) - set(ALL_ANALYSES))
+          if missing:
+              sys.exit(f"analyses declared but not implemented: {missing}")
+          if orphaned:
+              sys.exit(f"analyses implemented but not selectable: {orphaned}")
+          print("every analysis is declared and implemented")
+          PY
+
+      - name: Every catalog alias is reachable and unambiguous
+        # An alias that normalises to "" can never match, so the entry is dead
+        # code that still reads as coverage on the tin. An alias that resolves to
+        # two canonical keys would let a live source vouch for a dead one.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          from logcoverage.catalog import BUILTIN_ALIASES, canonical_source
+          from logcoverage.validation import normalize_key
+          dead = [(c, a) for c, aliases in BUILTIN_ALIASES.items() for a in aliases if not normalize_key(a)]
+          if dead:
+              sys.exit(f"unreachable catalog aliases: {dead}")
+          unreachable = [c for c in BUILTIN_ALIASES if canonical_source(c) != c]
+          if unreachable:
+              sys.exit(f"canonical keys that do not map to themselves: {unreachable}")
+          seen = {}
+          for canonical, aliases in BUILTIN_ALIASES.items():
+              for alias in aliases:
+                  key = normalize_key(alias)
+                  if key in seen and seen[key] != canonical:
+                      sys.exit(f"alias {alias!r} maps to both {seen[key]} and {canonical}")
+                  seen[key] = canonical
+          print("all catalog aliases reachable and unambiguous")
+          PY
+
+      - name: Nothing indeterminate can trip a severity threshold
+        # The tri-state promise, enforced rather than documented. Reporting a
+        # source the tool could not query as one the SIEM does not have would
+        # send somebody to rebuild a working pipeline, which is the worst thing
+        # this tool can do.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          from logcoverage.models import Determination, Severity
+          from logcoverage.severity import BASE_SEVERITY, Issue, RelianceTier, rate
+          missing = [i.value for i in Issue if i not in BASE_SEVERITY]
+          if missing:
+              sys.exit(f"issues with no band in the table: {missing}")
+          loud = [
+              i.value for i in Issue for t in RelianceTier
+              if rate(i, tier=t, determination=Determination.UNKNOWN) >= Severity.MEDIUM
+          ]
+          if loud:
+              sys.exit(f"indeterminate findings above the cap: {loud}")
+          print("every issue is in the table and capped when indeterminate")
+          PY
+
+      - name: No module converts UNKNOWN into ABSENT
+        # The one line that would undo the whole design. Written as a grep
+        # because it is the shape a well-meaning refactor takes.
+        run: |
+          set -euo pipefail
+          if grep -rnE 'is_unknown.*(ABSENT|is_absent)' src/logcoverage/ | grep -v 'from_optional'; then
+            echo "::error::a module maps the indeterminate state onto absence"; exit 1
+          fi
+          echo "the tri-state is intact"
+
+  smoke:
+    name: end-to-end smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: A healthy estate reports live coverage
+        run: |
+          set -euo pipefail
+          mkdir -p ci/rules
+          # Three rules on one source, so the source sits at the broad reliance
+          # tier and its failure rates at the default fail_on threshold. One rule
+          # would be the narrow tier and would deliberately not trip it.
+          for n in 1 2 3; do
+            cat > "ci/rules/rule$n.yml" <<RULE
+          title: Lateral movement detection $n
+          id: 1111111$n-1111-1111-1111-111111111111
+          status: stable
+          tags: [attack.lateral_movement, attack.t1021.002]
+          logsource: {product: windows, service: security}
+          detection:
+              selection: {EventID: 7045}
+              condition: selection
+          level: high
+          RULE
+          done
+
+          python - <<'PY'
+          import datetime, json
+          now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+          export = {
+              "siem": "splunk", "collected_at": now.isoformat(), "window_days": 7,
+              "inventory_complete": True,
+              "sources": [{
+                  "name": "WinEventLog:Security",
+                  "last_event": now.isoformat(),
+                  "event_count": 42000000,
+                  "baseline_events_per_day": 6000000,
+                  "fields": ["EventID"],
+              }],
+          }
+          open("ci/ingestion.json", "w").write(json.dumps(export))
+          PY
+
+          printf 'rules:\n  sigma:\n    path: ci/rules\ningestion:\n  type: file\n  file:\n    path: ci/ingestion.json\nsettings:\n  state_path: ci/state.json\n' > ci/coverage.yml
+
+          logcoverage scan -c ci/coverage.yml -o run1.md
+          grep -q "this run establishes the baseline" run1.md
+          grep -qi "live" run1.md
+          echo "a healthy estate reports live coverage"
+
+      - name: A source going silent turns live coverage into lost coverage
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime, json
+          export = json.load(open("ci/ingestion.json"))
+          old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=130)
+          export["sources"][0]["last_event"] = old.replace(microsecond=0).isoformat()
+          export["sources"][0]["event_count"] = 0
+          open("ci/ingestion.json", "w").write(json.dumps(export))
+          PY
+
+          logcoverage scan -c ci/coverage.yml -o run2.md --no-save && rc=0 || rc=$?
+          test "$rc" -eq 1 || { echo "expected exit 1 for findings, got $rc"; exit 1; }
+          grep -q "Coverage lost since the last run" run2.md
+          grep -q "T1021.002" run2.md
+          echo "coverage regression is detected end to end"
+
+      - name: An unqueryable inventory never becomes an absent source
+        # The tri-state promise end to end, and the worst failure this tool could
+        # produce: telling a detection engineer to rebuild a working pipeline.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          export = json.load(open("ci/ingestion.json"))
+          export["inventory_complete"] = False
+          export["sources"] = []
+          open("ci/blind.json", "w").write(json.dumps(export))
+          PY
+          printf 'rules:\n  sigma:\n    path: ci/rules\ningestion:\n  type: file\n  file:\n    path: ci/blind.json\nsettings:\n  state_path: ci/blind-state.json\n' > ci/blind.yml
+
+          logcoverage coverage -c ci/blind.yml | tee coverage.txt
+          grep -q "ingestion_inventory.*COULD NOT DETERMINE" coverage.txt
+
+          logcoverage scan -c ci/blind.yml -f json -o blind.json --no-save --fail-on critical
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("blind.json"))
+          assert "ingestion_inventory" in report["indeterminate_facets"], "coverage gap not reported"
+          issues = {f["issue"] for f in report["findings"]}
+          assert "source_required_absent" not in issues, "an unqueryable source was reported as absent"
+          loud = [f for f in report["findings"]
+                  if f["determination"] == "unknown" and f["severity"] in ("medium", "high", "critical")]
+          assert not loud, f"indeterminate findings above the cap: {loud}"
+          print("indeterminate ingestion is reported and capped")
+          PY
+
+      - name: A malformed rule degrades rather than disappearing
+        run: |
+          set -euo pipefail
+          printf 'title: broken\n  bad: [unclosed\n' > ci/rules/broken.yml
+          logcoverage rules -c ci/coverage.yml | tee rules.txt
+          grep -q "Unreadable rule files" rules.txt
+          grep -q "broken.yml" rules.txt
+          echo "a malformed rule is reported, not silently skipped"
+
+      - name: A broken source exits 2, not 0
+        run: |
+          set -euo pipefail
+          printf 'rules:\n  sigma:\n    path: ci/rules\ningestion:\n  type: file\n  file:\n    path: /nonexistent.json\n' > broken.yml
+          logcoverage scan -c broken.yml >/dev/null 2>&1 && rc=0 || rc=$?
+          test "$rc" -eq 2 || { echo "expected exit 2, got $rc"; exit 1; }
+          echo "broken source fails loudly"
+
+      - name: The state file and reports are not world-readable
+        # The state file is a map of which detections are blind. So is the report.
+        run: |
+          set -euo pipefail
+          logcoverage scan -c ci/coverage.yml -f json -o out.json --no-save --fail-on critical || true
+          for f in ci/state.json out.json; do
+            mode=$(stat -c '%a' "$f")
+            test "$mode" = "600" || { echo "::error::$f is mode $mode, expected 600"; exit 1; }
+          done
+          echo "state and reports are 0600"

@@ -1,0 +1,14 @@
+title: Repeated Failed Sign-ins From One Address
+id: 7e3b0c11-2a55-4d0c-9f77-1c8e3b4a5d55
+status: stable
+tags:
+    - attack.credential_access
+    - attack.t1110
+logsource:
+    product: azure
+    service: signinlogs
+detection:
+    selection:
+        ResultType: 50126
+    condition: selection | count() by IPAddress > 20
+level: medium

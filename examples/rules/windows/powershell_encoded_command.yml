@@ -1,0 +1,16 @@
+title: Encoded PowerShell Command Line
+id: 0a6f0c6b-6b57-4e2f-8d61-3f0b1a5c7d22
+status: stable
+tags:
+    - attack.execution
+    - attack.t1059.001
+logsource:
+    product: windows
+    service: powershell
+detection:
+    selection:
+        ScriptBlockText|contains:
+            - ' -enc '
+            - ' -EncodedCommand '
+    condition: selection
+level: medium

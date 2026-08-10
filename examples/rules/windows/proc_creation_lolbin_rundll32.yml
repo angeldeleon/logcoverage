@@ -1,0 +1,21 @@
+title: Suspicious Rundll32 Execution
+id: 9b1d40cd-58f6-4f6b-9f4d-2d1f9e6c0a11
+status: stable
+tags:
+    - attack.defense_evasion
+    - attack.t1218.011
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    selection:
+        Image|endswith: '\rundll32.exe'
+        OriginalFileName: 'RUNDLL32.EXE'
+    suspicious:
+        CommandLine|contains:
+            - 'javascript:'
+            - 'shell32.dll,Control_RunDLL'
+    condition: selection and suspicious
+fields:
+    - ParentImage
+level: high

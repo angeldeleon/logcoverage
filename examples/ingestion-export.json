@@ -1,0 +1,81 @@
+{
+  "siem": "splunk",
+  "collected_at": "2026-08-10T06:00:00+00:00",
+  "window_days": 7,
+  "inventory_complete": true,
+  "sources": [
+    {
+      "name": "WinEventLog:Security",
+      "index": "wineventlog",
+      "last_event": "2026-08-10T05:58:12+00:00",
+      "event_count": 42000000,
+      "baseline_events_per_day": 6000000,
+      "fields": [
+        "EventID",
+        "ServiceName",
+        "SubjectUserName",
+        "LogonType"
+      ]
+    },
+    {
+      "name": "XmlWinEventLog:Microsoft-Windows-Sysmon/Operational",
+      "index": "sysmon",
+      "last_event": "2026-04-02T11:04:55+00:00",
+      "event_count": 0,
+      "fields": [
+        "EventID",
+        "Image",
+        "CommandLine",
+        "ParentImage"
+      ]
+    },
+    {
+      "name": "windows/process_creation",
+      "index": "wineventlog",
+      "last_event": "2026-08-10T05:59:40+00:00",
+      "event_count": 28000000,
+      "baseline_events_per_day": 4000000,
+      "fields": [
+        "Image",
+        "CommandLine",
+        "ParentImage"
+      ]
+    },
+    {
+      "name": "PowerShell:Operational",
+      "index": "wineventlog",
+      "last_event": "2026-08-10T05:57:03+00:00",
+      "event_count": 210000,
+      "baseline_events_per_day": 400000,
+      "fields": [
+        "ScriptBlockText",
+        "HostApplication"
+      ]
+    },
+    {
+      "name": "aws:cloudtrail",
+      "index": "cloud",
+      "last_event": "2026-08-10T05:59:59+00:00",
+      "event_count": 9800000,
+      "baseline_events_per_day": 1350000,
+      "fields": [
+        "eventName",
+        "eventSource",
+        "userIdentity.arn",
+        "sourceIPAddress"
+      ]
+    },
+    {
+      "name": "zeek:conn",
+      "index": "network",
+      "last_event": "2026-08-10T05:59:31+00:00",
+      "event_count": 88000000,
+      "baseline_events_per_day": 12000000,
+      "fields": [
+        "id.orig_h",
+        "id.resp_h",
+        "duration"
+      ]
+    }
+  ]
+}

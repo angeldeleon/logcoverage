@@ -1,0 +1,22 @@
+title: PsExec Service Installation
+id: 42c575ea-e01e-4a44-9a1a-0d16e1b1e3f1
+status: stable
+description: Detects the service installation event PsExec creates on the remote host.
+references:
+    - https://attack.mitre.org/techniques/T1021/002/
+author: example
+date: 2026/01/12
+tags:
+    - attack.lateral_movement
+    - attack.t1021.002
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 7045
+        ServiceName|contains: 'PSEXESVC'
+    condition: selection
+falsepositives:
+    - Legitimate administrative use
+level: high
